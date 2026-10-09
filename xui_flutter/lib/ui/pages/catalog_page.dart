@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/launcher_controller.dart';
 import '../../core/errors.dart';
+import '../../core/mod_catalog.dart';
 import '../../core/models.dart';
 import '../theme.dart';
 import '../widgets/glass.dart';
 
-/// Mod catalog backed by Modrinth, filtered to the selected build.
+/// Mod catalog from minecraft-inside.ru, filtered to the selected build.
 class CatalogPage extends StatefulWidget {
   const CatalogPage({super.key, required this.c});
 
@@ -20,7 +21,9 @@ class CatalogPage extends StatefulWidget {
 
 class _CatalogPageState extends State<CatalogPage> {
   final _query = TextEditingController();
-  List<ModrinthHit> _hits = [];
+  List<ModEntry> _hits = [];
+  int _page = 1;
+  bool _loadingMore = false;
   bool _loading = false;
   String? _error;
   Timer? _debounce;
@@ -48,11 +51,14 @@ class _CatalogPageState extends State<CatalogPage> {
       _error = null;
     });
     try {
-      final hits = await widget.c.api
-          .searchMods(_query.text.trim(), mcVersion: build?.mcVersion);
+      final q = _query.text.trim();
+      final hits = q.isEmpty
+          ? await widget.c.catalog.browse(mcVersion: build?.mcVersion)
+          : await widget.c.catalog.search(q, mcVersion: build?.mcVersion);
       if (!mounted) return;
       setState(() {
         _hits = hits;
+        _page = 1;
         _searchedFor = build?.id;
       });
     } catch (e) {
@@ -62,17 +68,39 @@ class _CatalogPageState extends State<CatalogPage> {
     }
   }
 
-  Future<void> _install(ModrinthHit m) async {
-    setState(() => _installing.add(m.projectId));
+  /// Next listing page (only when browsing, not searching).
+  Future<void> _more() async {
+    setState(() => _loadingMore = true);
+    try {
+      final next = await widget.c.catalog
+          .browse(mcVersion: widget.c.selected?.mcVersion, page: _page + 1);
+      if (!mounted) return;
+      final have = _hits.map((m) => m.id).toSet();
+      setState(() {
+        _hits = [..._hits, ...next.where((m) => !have.contains(m.id))];
+        _page++;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(friendlyError(e))));
+      }
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  Future<void> _install(ModEntry m) async {
+    setState(() => _installing.add(m.id));
     try {
       await widget.c.installMod(m);
-      _installed.add(m.projectId);
+      _installed.add(m.id);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendlyError(e))));
       }
     } finally {
-      if (mounted) setState(() => _installing.remove(m.projectId));
+      if (mounted) setState(() => _installing.remove(m.id));
     }
   }
 
@@ -102,7 +130,7 @@ class _CatalogPageState extends State<CatalogPage> {
                 width: context.u(240),
                 child: GlassField(
                   controller: _query,
-                  hint: 'Найти мод на Modrinth',
+                  hint: 'Найти мод на minecraft-inside.ru',
                   prefix: Icon(Icons.search_rounded,
                       size: context.u(12), color: XuiColors.text),
                   onChanged: (_) {
@@ -147,6 +175,7 @@ class _CatalogPageState extends State<CatalogPage> {
     }
     return LayoutBuilder(builder: (context, box) {
       final columns = (box.maxWidth / context.u(260)).floor().clamp(1, 4);
+      final canLoadMore = _query.text.trim().isEmpty;
       return GridView.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
@@ -154,11 +183,22 @@ class _CatalogPageState extends State<CatalogPage> {
           crossAxisSpacing: context.u(8),
           mainAxisSpacing: context.u(8),
         ),
-        itemCount: _hits.length,
+        itemCount: _hits.length + (canLoadMore ? 1 : 0),
         itemBuilder: (context, i) {
+          if (i == _hits.length) {
+            return Center(
+              child: GlassButton(
+                label: _loadingMore ? 'Загрузка…' : 'Показать ещё',
+                glass: Glass.rose,
+                height: 26,
+                fontSize: 8.5,
+                onTap: _loadingMore ? null : _more,
+              ),
+            );
+          }
           final m = _hits[i];
-          final busy = _installing.contains(m.projectId);
-          final done = _installed.contains(m.projectId);
+          final busy = _installing.contains(m.id);
+          final done = _installed.contains(m.id);
           return GlassPanel(
             radius: 11,
             padding: EdgeInsets.all(context.u(7)),
@@ -193,7 +233,13 @@ class _CatalogPageState extends State<CatalogPage> {
                           style: xuiText(context,
                               size: 7, color: XuiColors.textMuted, height: 1.3)),
                       SizedBox(height: context.u(2)),
-                      Text('${m.author} · ${_downloads(m.downloads)}',
+                      Text(
+                          [
+                            if (m.author.isNotEmpty) m.author,
+                            if (m.versions.isNotEmpty) m.versions.take(4).join(', '),
+                          ].join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: xuiText(context,
                               size: 6.5, color: const Color(0x99FFFFFF))),
                     ],
@@ -217,11 +263,5 @@ class _CatalogPageState extends State<CatalogPage> {
         },
       );
     });
-  }
-
-  static String _downloads(int n) {
-    if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M загрузок';
-    if (n >= 1000) return '${(n / 1000).toStringAsFixed(0)}K загрузок';
-    return '$n загрузок';
   }
 }

@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'downloader.dart';
 import 'models.dart';
 
-/// Mojang, Fabric and Modrinth HTTP endpoints.
+/// Mojang and Fabric HTTP endpoints.
 class Api {
   Api(this.dl);
 
@@ -15,7 +15,6 @@ class Api {
   static const javaRuntimesUrl =
       'https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json';
   static const fabricMeta = 'https://meta.fabricmc.net/v2';
-  static const modrinth = 'https://api.modrinth.com/v2';
 
   Future<List<VersionEntry>> versionManifest() async {
     final j = jsonDecode(await dl.getString(manifestUrl)) as Map<String, dynamic>;
@@ -69,52 +68,4 @@ class Api {
 
   Future<String> fabricProfileJson(String mcVersion, String loader) =>
       dl.getString('$fabricMeta/versions/loader/$mcVersion/$loader/profile/json');
-
-  Future<List<ModrinthHit>> searchMods(
-    String query, {
-    String? mcVersion,
-    String loader = 'fabric',
-    int offset = 0,
-  }) async {
-    final facets = [
-      ['project_type:mod'],
-      ['categories:$loader'],
-      if (mcVersion != null) ['versions:$mcVersion'],
-    ];
-    final uri = Uri.parse('$modrinth/search').replace(queryParameters: {
-      'query': query,
-      'limit': '30',
-      'offset': '$offset',
-      'index': query.isEmpty ? 'downloads' : 'relevance',
-      'facets': jsonEncode(facets),
-    });
-    final j = jsonDecode(await dl.getString(uri.toString())) as Map<String, dynamic>;
-    return (j['hits'] as List)
-        .map((e) => ModrinthHit.fromJson(e as Map<String, dynamic>))
-        .toList();
-  }
-
-  /// Primary file of the newest mod version matching the build.
-  Future<({String url, String filename, String? sha1})?> modFile(
-    String projectId, {
-    required String mcVersion,
-    String loader = 'fabric',
-  }) async {
-    final uri = Uri.parse('$modrinth/project/$projectId/version').replace(
-      queryParameters: {
-        'loaders': jsonEncode([loader]),
-        'game_versions': jsonEncode([mcVersion]),
-      },
-    );
-    final list = jsonDecode(await dl.getString(uri.toString())) as List;
-    if (list.isEmpty) return null;
-    final files = ((list.first as Map)['files'] as List).cast<Map<String, dynamic>>();
-    final file = files.firstWhere((f) => f['primary'] == true,
-        orElse: () => files.first);
-    return (
-      url: file['url'] as String,
-      filename: file['filename'] as String,
-      sha1: (file['hashes'] as Map?)?['sha1'] as String?,
-    );
-  }
 }

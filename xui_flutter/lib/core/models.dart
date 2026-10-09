@@ -154,35 +154,3 @@ class NewsItem {
   final String? link;
   final String? category;
 }
-
-class ModrinthHit {
-  ModrinthHit({
-    required this.projectId,
-    required this.slug,
-    required this.title,
-    required this.description,
-    required this.author,
-    required this.downloads,
-    this.iconUrl,
-  });
-
-  final String projectId;
-  final String slug;
-  final String title;
-  final String description;
-  final String author;
-  final int downloads;
-  final String? iconUrl;
-
-  factory ModrinthHit.fromJson(Map<String, dynamic> j) => ModrinthHit(
-        projectId: j['project_id'] as String,
-        slug: j['slug'] as String? ?? '',
-        title: j['title'] as String? ?? '',
-        description: j['description'] as String? ?? '',
-        author: j['author'] as String? ?? '',
-        downloads: (j['downloads'] as num?)?.toInt() ?? 0,
-        iconUrl: (j['icon_url'] as String?)?.isEmpty ?? true
-            ? null
-            : j['icon_url'] as String,
-      );
-}
