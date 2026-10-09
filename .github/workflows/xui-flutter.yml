@@ -1,0 +1,120 @@
+name: XUI Flutter Launcher
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - "develop"
+    tags:
+      - "xui-v*"
+  pull_request:
+    paths:
+      - "xui_flutter/**"
+      - ".github/workflows/xui-flutter.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: "3.47.7"
+
+defaults:
+  run:
+    working-directory: xui_flutter
+
+jobs:
+  check:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-latest
+            target: linux
+          - name: Windows
+            os: windows-latest
+            target: windows
+          - name: macOS
+            os: macos-latest
+            target: macos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter build ${{ matrix.target }} --release
+
+      - name: Package Linux
+        if: matrix.target == 'linux'
+        run: tar -czf ../XUILauncher-linux-x64.tar.gz -C build/linux/x64/release/bundle .
+
+      - name: Package Windows
+        if: matrix.target == 'windows'
+        shell: pwsh
+        run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath ../XUILauncher-windows-x64.zip
+
+      - name: Package macOS
+        if: matrix.target == 'macos'
+        run: ditto -c -k --sequesterRsrc --keepParent "build/macos/Build/Products/Release/XUI Launcher.app" ../XUILauncher-macos.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: XUILauncher-${{ matrix.target }}
+          path: XUILauncher-*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/xui-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: XUI Launcher ${{ github.ref_name }}
+          files: dist/*
+          generate_release_notes: true
