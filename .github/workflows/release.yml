@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - "*"
+      # Flutter launcher releases are published by xui-flutter.yml.
+      - "!xui-v*"
 
 permissions: {}
 
