@@ -9,6 +9,7 @@ import 'api.dart';
 import 'downloader.dart';
 import 'errors.dart';
 import 'game.dart';
+import 'mod_catalog.dart';
 import 'models.dart';
 import 'paths.dart';
 
@@ -20,12 +21,14 @@ class LauncherController extends ChangeNotifier {
       : dl = Downloader(),
         settings = LauncherSettings() {
     api = Api(dl);
+    catalog = MinecraftInside(dl.client);
     installer = GameInstaller(paths, dl, api);
   }
 
   final LauncherPaths paths;
   final Downloader dl;
   late final Api api;
+  late final MinecraftInside catalog;
   late final GameInstaller installer;
 
   LauncherSettings settings;
@@ -217,8 +220,8 @@ class LauncherController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Downloads a Modrinth mod into the selected build.
-  Future<String> installMod(ModrinthHit mod) async {
+  /// Downloads a mod from minecraft-inside.ru into the selected build.
+  Future<String> installMod(ModEntry mod) async {
     final b = selected;
     if (b == null) throw Exception('Сначала создайте сборку');
     if (b.loader != ModLoader.fabric) {
@@ -226,14 +229,15 @@ class LauncherController extends ChangeNotifier {
     }
     _setStatus('Установка ${mod.title}', null);
     try {
-      final file = await api.modFile(mod.projectId, mcVersion: b.mcVersion);
+      final file = MinecraftInside.pick(
+          await catalog.files(mod), b.mcVersion, 'fabric');
       if (file == null) {
-        throw Exception('${mod.title} нет для Minecraft ${b.mcVersion}');
+        throw Exception('${mod.title} нет для Fabric ${b.mcVersion}');
       }
-      await dl.download(DownloadTask(file.url, p.join(modsDir(b), file.filename),
-          sha1: file.sha1));
+      final path = await catalog.download(file, modsDir(b),
+          fallbackName: '${mod.url.split('/').last.replaceAll('.html', '')}-${b.mcVersion}.jar');
       _setStatus('${mod.title} установлен в «${b.name}»', 1);
-      return file.filename;
+      return p.basename(path);
     } catch (e) {
       _setStatus(friendlyError(e), 0);
       rethrow;
